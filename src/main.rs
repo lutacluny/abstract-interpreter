@@ -12,8 +12,8 @@ enum Var {
 
 #[derive(Debug)]
 enum SExpr {
-    Const(Box<Const>),
-    Var(Box<Var>),
+    CExpr(Box<Const>),
+    VExpr(Box<Var>),
     Neg(Box<SExpr>),
     Add(Box<SExpr>, Box<SExpr>),
     Sub(Box<SExpr>, Box<SExpr>),
@@ -52,9 +52,9 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
         .padded();
 
     let sexpr = recursive(|s_expr: Recursive<'_, char, SExpr, Simple<char>>| {
-        let int_expr = int.map(|c| SExpr::Const(Box::new(c))).padded();
+        let int_expr = int.map(|c| SExpr::CExpr(Box::new(c))).padded();
 
-        let ident_expr = ident.map(|i| SExpr::Var(Box::new(i))).padded();
+        let ident_expr = ident.map(|i| SExpr::VExpr(Box::new(i))).padded();
 
         let atom = int_expr
             .or(ident_expr)
@@ -99,7 +99,11 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
         .map(|(var, then)| Command::Assign(Box::new(var), Box::new(then)))
         .padded();
 
-    skip.or(assign).then_ignore(end())
+    let input = text::keyword("input")
+        .then(int.delimited_by(just('('), just(')')).padded())
+        .map(|(_, then)| Command::Input(Box::new(then)));
+
+    input.or(skip).or(assign).then_ignore(end())
 }
 fn eval(expr: &SExpr) -> Result<f64, String> {
     match expr {
