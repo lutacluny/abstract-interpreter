@@ -1,4 +1,4 @@
-use chumsky::{prelude::*, Error};
+use chumsky::{prelude::*, recursive, Error};
 
 #[derive(Debug)]
 enum Const {
@@ -41,70 +41,100 @@ enum Command {
 }
 
 fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
-    let skip = text::keyword("skip").map(|_| Command::Skip).padded();
+    let command = recursive(|command| {
+        let skip = text::keyword::<_, _, Simple<char>>("skip")
+            .map(|_| Command::Skip)
+            .padded();
 
-    let int = text::int(10)
-        .map(|s: String| Const::Const(s.parse().unwrap()))
-        .padded();
+        let int = text::int(10)
+            .map(|s: String| Const::Const(s.parse().unwrap()))
+            .padded();
 
-    let ident = text::ident::<char, Simple<char>>()
-        .map(|s: String| Var::Var(s))
-        .padded();
+        let ident = text::ident::<char, Simple<char>>()
+            .map(|s: String| Var::Var(s))
+            .padded();
 
-    let sexpr = recursive(|s_expr: Recursive<'_, char, SExpr, Simple<char>>| {
         let int_expr = int.map(|c| SExpr::CExpr(Box::new(c))).padded();
 
         let ident_expr = ident.map(|i| SExpr::VExpr(Box::new(i))).padded();
 
-        let atom = int_expr
-            .or(ident_expr)
-            .or(s_expr.delimited_by(just('('), just(')')))
+        let op = |s: String| just(s).padded();
+
+        let sexpr = recursive(|s_expr| {
+            let atom = int_expr
+                .or(ident_expr)
+                .or(s_expr.delimited_by(just('('), just(')')))
+                .padded();
+
+            let unary = op("-".to_string())
+                .repeated()
+                .then(atom)
+                .foldr(|_op, rhs| SExpr::Neg(Box::new(rhs)));
+
+            let product = unary
+                .clone()
+                .then(
+                    op("*".to_string())
+                        .to(SExpr::Mul as fn(_, _) -> _)
+                        .or(op("/".to_string()).to(SExpr::Div as fn(_, _) -> _))
+                        .then(unary)
+                        .repeated(),
+                )
+                .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
+
+            let sum = product
+                .clone()
+                .then(
+                    op("+".to_string())
+                        .to(SExpr::Add as fn(_, _) -> _)
+                        .or(op("-".to_string()).to(SExpr::Sub as fn(_, _) -> _))
+                        .then(product)
+                        .repeated(),
+                )
+                .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
+
+            sum
+        });
+
+        let bexpr = ident
+            .then(
+                op(">=".to_string())
+                    .or(op(">".to_string()))
+                    .or(op("=<".to_string()))
+                    .or(op("<".to_string()))
+                    .or(op("==".to_string())),
+            )
+            .then(int)
+            .map(|((v, o), c)| construct_bexpr(&o, v, c));
+
+        let assign = ident
+            .then_ignore(just(":="))
+            .then(sexpr.clone())
+            .map(|(var, then)| Command::Assign(Box::new(var), Box::new(then)))
             .padded();
 
-        let op = |c| just(c).padded();
+        let input = text::keyword("input")
+            .ignore_then(int.delimited_by(just('('), just(')')).padded())
+            .map(|then| Command::Input(Box::new(then)));
 
-        let unary = op('-')
-            .repeated()
-            .then(atom)
-            .foldr(|_op, rhs| SExpr::Neg(Box::new(rhs)));
+        let cif = text::keyword("if")
+            .padded()
+            .ignore_then(bexpr.clone().delimited_by(just('('), just(')')))
+            .padded()
+            .then(command.clone().delimited_by(just('{'), just('}')))
+            .padded()
+            .then_ignore(text::keyword("else"))
+            .padded()
+            .then(command.clone().delimited_by(just('{'), just('}')))
+            .padded()
+            .map(|((b_expr, c1), c2)| Command::If(Box::new(b_expr), Box::new(c1), Box::new(c2)));
 
-        let product = unary
-            .clone()
-            .then(
-                op('*')
-                    .to(SExpr::Mul as fn(_, _) -> _)
-                    .or(op('/').to(SExpr::Div as fn(_, _) -> _))
-                    .then(unary)
-                    .repeated(),
-            )
-            .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
-
-        let sum = product
-            .clone()
-            .then(
-                op('+')
-                    .to(SExpr::Add as fn(_, _) -> _)
-                    .or(op('-').to(SExpr::Sub as fn(_, _) -> _))
-                    .then(product)
-                    .repeated(),
-            )
-            .foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
-
-        sum
+        skip.or(cif)
     });
 
-    let assign = ident
-        .then_ignore(just(":="))
-        .then(sexpr.clone())
-        .map(|(var, then)| Command::Assign(Box::new(var), Box::new(then)))
-        .padded();
-
-    let input = text::keyword("input")
-        .then(int.delimited_by(just('('), just(')')).padded())
-        .map(|(_, then)| Command::Input(Box::new(then)));
-
-    input.or(skip).or(assign).then_ignore(end())
+    command
 }
+
 fn eval(expr: &SExpr) -> Result<f64, String> {
     match expr {
         SExpr::Neg(a) => Ok(-eval(a)?),
@@ -116,6 +146,16 @@ fn eval(expr: &SExpr) -> Result<f64, String> {
     }
 }
 
+fn construct_bexpr(s: &str, v: Var, c: Const) -> BExpr {
+    match s {
+        "==" => BExpr::EQ(Box::new(v), Box::new(c)),
+        ">=" => BExpr::GE(Box::new(v), Box::new(c)),
+        ">" => BExpr::GT(Box::new(v), Box::new(c)),
+        "<=" => BExpr::LE(Box::new(v), Box::new(c)),
+        "<" => BExpr::LT(Box::new(v), Box::new(c)),
+        _ => todo!(),
+    }
+}
 fn main() {
     let src = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
 

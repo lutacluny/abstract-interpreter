@@ -1,1 +1,1 @@
-x := 4 * 5 + 21 - (23 + x)
+if (x == 4) {skip} else {skip}
