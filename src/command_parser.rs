@@ -1,4 +1,4 @@
-use chumsky::{prelude::*, recursive, Error};
+use chumsky::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Const {
@@ -12,8 +12,8 @@ pub enum Var {
 
 #[derive(Debug, PartialEq)]
 pub enum SExpr {
-    CExpr(Box<Const>),
-    VExpr(Box<Var>),
+    CExpr(Const),
+    VExpr(Var),
     Neg(Box<SExpr>),
     Add(Box<SExpr>, Box<SExpr>),
     Sub(Box<SExpr>, Box<SExpr>),
@@ -23,46 +23,46 @@ pub enum SExpr {
 
 #[derive(Debug, PartialEq)]
 pub enum BExpr {
-    GE(Box<Var>, Box<Const>),
-    GT(Box<Var>, Box<Const>),
-    LE(Box<Var>, Box<Const>),
-    LT(Box<Var>, Box<Const>),
-    EQ(Box<Var>, Box<Const>),
+    GE(Var, Const),
+    GT(Var, Const),
+    LE(Var, Const),
+    LT(Var, Const),
+    EQ(Var, Const),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Skip,
     Seq(Box<Command>, Box<Command>),
-    Assign(Box<Var>, Box<SExpr>),
-    Input(Box<Const>),
-    If(Box<BExpr>, Box<Command>, Box<Command>),
-    While(Box<BExpr>, Box<Command>),
+    Assign(Var, SExpr),
+    Input(Const),
+    If(BExpr, Box<Command>, Box<Command>),
+    While(BExpr, Box<Command>),
 }
 
 fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
-    let command = recursive(|command| {
+    let command: Recursive<'_, char, Command, Simple<char>> = recursive(|command| {
         let skip = text::keyword::<_, _, Simple<char>>("skip")
             .padded()
             .map(|_| Command::Skip);
 
-        let int = text::int(10)
+        let cconst = text::int(10)
             .padded()
             .map(|s: String| Const::Const(s.parse().unwrap()));
 
-        let ident = text::ident::<char, Simple<char>>()
+        let var = text::ident::<char, Simple<char>>()
             .padded()
             .map(|s: String| Var::Var(s));
 
-        let int_expr = int.map(|c| SExpr::CExpr(Box::new(c)));
+        let const_expr = cconst.map(SExpr::CExpr);
 
-        let ident_expr = ident.map(|i| SExpr::VExpr(Box::new(i)));
+        let var_expr = var.map(SExpr::VExpr);
 
         let op = |s: String| just(s).padded();
 
-        let sexpr = recursive(|s_expr| {
-            let atom = int_expr
-                .or(ident_expr)
+        let s_expr = recursive(|s_expr| {
+            let atom = const_expr
+                .or(var_expr)
                 .or(s_expr.delimited_by(just('('), just(')')))
                 .padded();
 
@@ -96,7 +96,7 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             sum
         });
 
-        let bexpr = ident
+        let b_expr = var
             .then(
                 op(">=".to_string())
                     .or(op(">".to_string()))
@@ -104,21 +104,21 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
                     .or(op("<".to_string()))
                     .or(op("==".to_string())),
             )
-            .then(int)
+            .then(cconst)
             .map(|((v, o), c)| construct_bexpr(&o, v, c));
 
-        let assign = ident
+        let assign = var
             .then_ignore(just(":="))
-            .then(sexpr.clone())
-            .map(|(var, then)| Command::Assign(Box::new(var), Box::new(then)));
+            .then(s_expr.clone())
+            .map(|(var, then)| Command::Assign(var, then));
 
         let input = text::keyword("input")
-            .ignore_then(int.delimited_by(just('('), just(')')))
-            .map(|then| Command::Input(Box::new(then)));
+            .ignore_then(cconst.delimited_by(just('('), just(')')))
+            .map(Command::Input);
 
         let cif = text::keyword("if")
             .padded()
-            .ignore_then(bexpr.clone().delimited_by(just('('), just(')')))
+            .ignore_then(b_expr.clone().delimited_by(just('('), just(')')))
             .padded()
             .then(command.clone().delimited_by(just('{'), just('}')))
             .padded()
@@ -126,12 +126,20 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             .padded()
             .then(command.clone().delimited_by(just('{'), just('}')))
             .padded()
-            .map(|((b_expr, c1), c2)| Command::If(Box::new(b_expr), Box::new(c1), Box::new(c2)));
+            .map(|((b_expr, c1), c2)| Command::If(b_expr, Box::new(c1), Box::new(c2)));
 
         input.or(cif).or(skip).or(assign)
     });
 
     command
+        .padded()
+        .separated_by(just(";\n"))
+        .then_ignore(end())
+        .map(|c| {
+            c.into_iter()
+                .reduce(|acc, c| Command::Seq(Box::new(acc), Box::new(c)))
+                .unwrap()
+        })
 }
 
 pub fn parse(src: &str) -> Command {
@@ -143,11 +151,11 @@ pub fn parse(src: &str) -> Command {
 
 fn construct_bexpr(s: &str, v: Var, c: Const) -> BExpr {
     match s {
-        "==" => BExpr::EQ(Box::new(v), Box::new(c)),
-        ">=" => BExpr::GE(Box::new(v), Box::new(c)),
-        ">" => BExpr::GT(Box::new(v), Box::new(c)),
-        "<=" => BExpr::LE(Box::new(v), Box::new(c)),
-        "<" => BExpr::LT(Box::new(v), Box::new(c)),
+        "==" => BExpr::EQ(v, c),
+        ">=" => BExpr::GE(v, c),
+        ">" => BExpr::GT(v, c),
+        "<=" => BExpr::LE(v, c),
+        "<" => BExpr::LT(v, c),
         _ => todo!(),
     }
 }
@@ -169,10 +177,7 @@ mod tests {
         let command = parse(&program);
         assert_eq!(
             command,
-            Command::Assign(
-                Box::new(Var::Var("x".to_string())),
-                Box::new(SExpr::CExpr(Box::new(Const::Const(50.0))))
-            )
+            Command::Assign(Var::Var("x".to_string()), SExpr::CExpr(Const::Const(50.0)))
         );
     }
 
@@ -180,7 +185,7 @@ mod tests {
     fn input() {
         let program = "input(50)";
         let command = parse(&program);
-        assert_eq!(command, Command::Input(Box::new(Const::Const(50.0))));
+        assert_eq!(command, Command::Input(Const::Const(50.0)));
     }
 
     #[test]
@@ -190,13 +195,20 @@ mod tests {
         assert_eq!(
             command,
             Command::If(
-                Box::new(BExpr::EQ(
-                    Box::new(Var::Var("x".to_string())),
-                    Box::new(Const::Const(50.0))
-                )),
+                BExpr::EQ(Var::Var("x".to_string()), Const::Const(50.0)),
                 Box::new(Command::Skip),
                 Box::new(Command::Skip)
             )
+        );
+    }
+
+    #[test]
+    fn seq() {
+        let program = "skip;\nskip";
+        let command = parse(&program);
+        assert_eq!(
+            Command::Seq(Box::new(Command::Skip), Box::new(Command::Skip)),
+            command
         );
     }
 }

@@ -1,1 +1,3 @@
-if (x == 4) {skip} else {skip}
+skip;
+skip;
+skip
