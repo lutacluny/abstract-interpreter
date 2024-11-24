@@ -128,18 +128,24 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             .padded()
             .map(|((b_expr, c1), c2)| Command::If(b_expr, Box::new(c1), Box::new(c2)));
 
-        input.or(cif).or(skip).or(assign)
-    });
+        let cwhile = text::keyword("while")
+            .padded()
+            .ignore_then(b_expr.clone().delimited_by(just('('), just(')')))
+            .padded()
+            .then(command.clone().delimited_by(just('{'), just('}')))
+            .padded()
+            .map(|(b_expr, c)| Command::While(b_expr, Box::new(c)));
 
-    command
-        .padded()
-        .separated_by(just(";\n"))
-        .then_ignore(end())
-        .map(|c| {
+        let single_command = input.or(cif).or(skip).or(assign).or(cwhile);
+
+        single_command.separated_by(just(";")).map(|c| {
             c.into_iter()
                 .reduce(|acc, c| Command::Seq(Box::new(acc), Box::new(c)))
                 .unwrap()
         })
+    });
+
+    command.then_ignore(end())
 }
 
 pub fn parse(src: &str) -> Command {
@@ -203,12 +209,51 @@ mod tests {
     }
 
     #[test]
+    fn cwhile() {
+        let program = "while (x < 10) {skip}";
+        let command = parse(&program);
+        assert_eq!(
+            command,
+            Command::While(
+                BExpr::LT(Var::Var("x".to_string()), Const::Const(10.0)),
+                Box::new(Command::Skip)
+            )
+        );
+    }
+
+    #[test]
     fn seq() {
-        let program = "skip;\nskip";
+        let program = "skip;skip";
         let command = parse(&program);
         assert_eq!(
             Command::Seq(Box::new(Command::Skip), Box::new(Command::Skip)),
             command
         );
+    }
+
+    #[test]
+    fn nested_seq() {
+        let program = "while (x < 10) {skip;skip}; skip";
+        let command = parse(&program);
+        assert_eq!(
+            Command::Seq(
+                Box::new(Command::While(
+                    BExpr::LT(Var::Var("x".to_string()), Const::Const(10.0)),
+                    Box::new(Command::Seq(
+                        Box::new(Command::Skip),
+                        Box::new(Command::Skip)
+                    ))
+                )),
+                Box::new(Command::Skip)
+            ),
+            command
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn not_in_language() {
+        let program = "while (x < 10) {}";
+        parse(&program);
     }
 }
