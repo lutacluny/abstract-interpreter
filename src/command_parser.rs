@@ -35,7 +35,7 @@ pub enum Command {
     Skip,
     Seq(Box<Command>, Box<Command>),
     Assign(Var, SExpr),
-    Input(Const),
+    Input(Var),
     If(BExpr, Box<Command>, Box<Command>),
     While(BExpr, Box<Command>),
 }
@@ -113,7 +113,7 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             .map(|(var, then)| Command::Assign(var, then));
 
         let input = text::keyword("input")
-            .ignore_then(cconst.delimited_by(just('('), just(')')))
+            .ignore_then(var.delimited_by(just('('), just(')')))
             .map(Command::Input);
 
         let cif = text::keyword("if")
@@ -189,9 +189,9 @@ mod tests {
 
     #[test]
     fn input() {
-        let program = "input(50)";
+        let program = "input(x)";
         let command = parse(&program);
-        assert_eq!(command, Command::Input(Const::Const(50.0)));
+        assert_eq!(command, Command::Input(Var::Var("x".to_string())));
     }
 
     #[test]
