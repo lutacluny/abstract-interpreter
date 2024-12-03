@@ -28,6 +28,43 @@ pub enum BExpr {
     LE(Var, Const),
     LT(Var, Const),
     EQ(Var, Const),
+    NE(Var, Const),
+}
+
+impl BExpr {
+    pub fn get_ident(&self) -> &String {
+        match self {
+            BExpr::EQ(Var::Var(ident), _) => ident,
+            BExpr::GT(Var::Var(ident), _) => ident,
+            BExpr::GE(Var::Var(ident), _) => ident,
+            BExpr::LT(Var::Var(ident), _) => ident,
+            BExpr::LE(Var::Var(ident), _) => ident,
+            BExpr::NE(Var::Var(ident), _) => ident,
+        }
+    }
+
+    pub fn negate(&self) -> Self {
+        match self {
+            BExpr::EQ(Var::Var(ident), Const::Const(number)) => {
+                BExpr::NE(Var::Var(ident.clone()), Const::Const(*number))
+            }
+            BExpr::GT(Var::Var(ident), Const::Const(number)) => {
+                BExpr::LE(Var::Var(ident.clone()), Const::Const(*number))
+            }
+            BExpr::GE(Var::Var(ident), Const::Const(number)) => {
+                BExpr::LT(Var::Var(ident.clone()), Const::Const(*number))
+            }
+            BExpr::LT(Var::Var(ident), Const::Const(number)) => {
+                BExpr::GE(Var::Var(ident.clone()), Const::Const(*number))
+            }
+            BExpr::LE(Var::Var(ident), Const::Const(number)) => {
+                BExpr::GT(Var::Var(ident.clone()), Const::Const(*number))
+            }
+            BExpr::NE(Var::Var(ident), Const::Const(number)) => {
+                BExpr::EQ(Var::Var(ident.clone()), Const::Const(*number))
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,7 +175,7 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
 
         let single_command = input.or(cif).or(skip).or(assign).or(cwhile);
 
-        single_command.separated_by(just(";")).map(|c| {
+        single_command.separated_by(just(';')).map(|c| {
             c.into_iter()
                 .reduce(|acc, c| Command::Seq(Box::new(acc), Box::new(c)))
                 .unwrap()
@@ -162,6 +199,7 @@ fn construct_bexpr(s: &str, v: Var, c: Const) -> BExpr {
         ">" => BExpr::GT(v, c),
         "<=" => BExpr::LE(v, c),
         "<" => BExpr::LT(v, c),
+        "!=" => BExpr::NE(v, c),
         _ => todo!(),
     }
 }
