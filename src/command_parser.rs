@@ -83,9 +83,16 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             .padded()
             .map(|_| Command::Skip);
 
-        let cconst = text::int(10)
+        let cconst_pos = text::int(10)
             .padded()
             .map(|s: String| Const::Const(s.parse().unwrap()));
+
+        let cconst_neg = just('-')
+            .padded()
+            .then(cconst_pos)
+            .map(|(_, Const::Const(number))| Const::Const(-number));
+
+        let cconst = cconst_pos.or(cconst_neg);
 
         let var = text::ident::<char, Simple<char>>()
             .padded()

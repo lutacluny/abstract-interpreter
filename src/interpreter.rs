@@ -1,4 +1,5 @@
 use core::f64;
+use std::fmt::Debug;
 use std::{cmp, collections::HashMap, convert::From, ops};
 
 use crate::command_parser::{BExpr, Command, Const, SExpr, Var};
@@ -9,12 +10,13 @@ pub struct Bottom;
 pub trait AbstractProperties<A> {
     fn top() -> Top;
     fn bottom() -> Bottom;
+    fn sat(a: &A, bexpr: &BExpr) -> bool;
     fn inclusion(a0: A, a1: A) -> bool;
     fn join(a0: &A, a1: &A) -> A;
-    fn filter(a: &A, bexpr: &BExpr) -> A;
+    fn refine(a: &A, bexpr: &BExpr) -> A;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemoryState<
     A: ops::Add<Output = A>
         + ops::Neg<Output = A>
@@ -44,7 +46,8 @@ impl<
             + Copy
             + AbstractProperties<A>
             + From<Top>
-            + From<Bottom>,
+            + From<Bottom>
+            + Debug,
     > MemoryState<A>
 {
     pub fn new() -> MemoryState<A> {
@@ -87,10 +90,10 @@ impl<
         self
     }
 
-    fn interprete_sexpr(&self, sexpr: &SExpr) -> A {
+    fn interprete_sexpr(&mut self, sexpr: &SExpr) -> A {
         match sexpr {
             SExpr::CExpr(Const::Const(number)) => number.clone().into(),
-            SExpr::VExpr(Var::Var(ident)) => self.get_from_state_or_panic(ident),
+            SExpr::VExpr(Var::Var(ident)) => self.get_from_state_or_insert_default(ident),
             SExpr::Neg(sexpr) => -self.interprete_sexpr(sexpr),
             SExpr::Add(sexpr1, sexpr2) => {
                 self.interprete_sexpr(sexpr1) + self.interprete_sexpr(sexpr2)
@@ -107,34 +110,36 @@ impl<
         }
     }
 
-    fn interprete_bexpr(&self, bexpr: &BExpr) -> bool {
+    fn interprete_bexpr(&mut self, bexpr: &BExpr) -> bool {
         match bexpr {
             BExpr::GE(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) >= number.clone().into()
+                self.get_from_state_or_insert_default(ident) >= number.clone().into()
             }
             BExpr::GT(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) > number.clone().into()
+                self.get_from_state_or_insert_default(ident) > number.clone().into()
             }
             BExpr::LE(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) <= number.clone().into()
+                self.get_from_state_or_insert_default(ident) <= number.clone().into()
             }
             BExpr::LT(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) < number.clone().into()
+                self.get_from_state_or_insert_default(ident) < number.clone().into()
             }
             BExpr::EQ(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) == number.clone().into()
+                self.get_from_state_or_insert_default(ident) == number.clone().into()
             }
             BExpr::NE(Var::Var(ident), Const::Const(number)) => {
-                self.get_from_state_or_panic(ident) != number.clone().into()
+                self.get_from_state_or_insert_default(ident) != number.clone().into()
             }
         }
     }
 
-    fn get_from_state_or_panic(&self, ident: &String) -> A {
+    fn get_from_state_or_insert_default(&mut self, ident: &String) -> A {
         if let Some(&number) = self.state.get(ident) {
             number
         } else {
-            panic!("Var {} is not in the memory state", ident);
+            let default = A::top().into();
+            self.state.insert(ident.clone(), default);
+            default
         }
     }
 
@@ -153,21 +158,28 @@ impl<
                 self.state.insert(ident.clone(), A::top().into());
             }
             Command::If(bexpr, c1, c2) => {
-                let m1 = self.clone().filter(bexpr).analyze_command(c1).to_owned();
+                let m1 = self
+                    .clone()
+                    .filter(bexpr)
+                    .to_owned()
+                    .analyze_command(c1)
+                    .to_owned();
+
                 self.filter(&bexpr.negate()).analyze_command(c2);
+
                 self.join(&m1);
             }
-            Command::While(bexpr, c) => loop {
-                let prev_m = self.clone();
-                self.filter(bexpr).analyze_command(c);
-                self.join(&prev_m);
+            Command::While(bexpr, c) => {
+                loop {
+                    let prev_m = self.clone().filter(bexpr).analyze_command(c).to_owned();
+                    self.join(&prev_m);
 
-                if prev_m.inclusion(self) {
-                    break;
+                    if prev_m.inclusion(self) {
+                        break;
+                    }
                 }
-
                 self.filter(&bexpr.negate());
-            },
+            }
         }
         self
     }
@@ -185,9 +197,14 @@ impl<
 
     fn filter(&mut self, bexpr: &BExpr) -> &mut Self {
         let ident = bexpr.get_ident();
-        let a = self.get_from_state_or_panic(ident);
-        let a_filtered = A::filter(&a, bexpr);
-        self.state.insert(ident.clone(), a_filtered);
+        let a = self.get_from_state_or_insert_default(ident);
+
+        if A::sat(&a, bexpr) {
+            let a_filtered = A::refine(&a, bexpr);
+            self.state.insert(ident.clone(), a_filtered);
+        } else {
+            self.set_all_vars_to_bottom();
+        }
 
         self
     }
@@ -202,5 +219,11 @@ impl<
         }
 
         true
+    }
+
+    fn set_all_vars_to_bottom(&mut self) {
+        for value in self.state.values_mut() {
+            *value = A::bottom().into();
+        }
     }
 }

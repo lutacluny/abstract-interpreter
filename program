@@ -1,1 +1,1 @@
-skip;input(x);skip
+if (x > 7) {y := x - 7} {y := 7 - x}
