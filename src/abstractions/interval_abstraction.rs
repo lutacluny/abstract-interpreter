@@ -20,7 +20,7 @@ impl Interval {
 }
 
 #[derive(Copy, Clone, Debug)]
-enum IntervalAbstraction {
+pub enum IntervalAbstraction {
     Bottom,
     Interval(Interval),
     Top,
