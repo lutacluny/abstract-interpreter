@@ -1,6 +1,6 @@
 # Abstract Interpreter and Analyzer
 
-This command line program written in pure Rust allows to parse a program into an Abstract Syntax Tree to interprete or analyze it in an abstract manner.
+This command line program, written in pure Rust, that allows to parse a program into an Abstract Syntax Tree to interprete or analyze it in an abstract manner.
 
 ## Build from source
 
