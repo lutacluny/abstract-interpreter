@@ -175,49 +175,32 @@ impl AbstractProperties<SignAbstraction> for SignAbstraction {
     }
 
     fn sat(a: &SignAbstraction, bexpr: &BExpr) -> bool {
-        if *a == SignAbstraction::Bottom {
-            return false;
-        }
-
-        let a_number: SignAbstraction;
-
-        match bexpr {
-            BExpr::EQ(_, Const::Const(number)) => {
-                let number = *number;
-                a_number = number.into();
-            }
-            BExpr::GE(_, Const::Const(number)) => {
-                let number = *number;
-                a_number = number.into();
-            }
-            BExpr::GT(_, Const::Const(number)) => {
-                let number = *number;
-                if number == 0.0 {
-                    a_number = Self::Pos;
-                } else {
-                    a_number = number.into();
+        let result = match a {
+            Self::Bottom => false,
+            Self::Top => true,
+            _ => match bexpr {
+                BExpr::EQ(_, Const::Const(number)) => {
+                    *a == <f64 as Into<SignAbstraction>>::into(*number)
                 }
-            }
-            BExpr::LE(_, Const::Const(number)) => {
-                let number = *number;
-                a_number = number.into();
-            }
-            BExpr::LT(_, Const::Const(number)) => {
-                let number = *number;
-                if number == 0.0 {
-                    a_number = Self::Neg;
-                } else {
-                    a_number = number.into();
+                BExpr::GE(_, Const::Const(number)) => {
+                    *a >= <f64 as Into<SignAbstraction>>::into(*number)
                 }
-            }
-            BExpr::NE(_, Const::Const(number)) => {
-                let number = *number;
-                a_number = number.into();
-                return !Self::inclusion(a_number, *a);
-            }
-        }
+                BExpr::GT(_, Const::Const(number)) => {
+                    *a > <f64 as Into<SignAbstraction>>::into(*number)
+                }
+                BExpr::LE(_, Const::Const(number)) => {
+                    *a <= <f64 as Into<SignAbstraction>>::into(*number)
+                }
+                BExpr::LT(_, Const::Const(number)) => {
+                    *a < <f64 as Into<SignAbstraction>>::into(*number)
+                }
+                BExpr::NE(_, Const::Const(number)) => {
+                    *a != <f64 as Into<SignAbstraction>>::into(*number)
+                }
+            },
+        };
 
-        Self::inclusion(a_number, *a)
+        result
     }
     fn inclusion(a0: Self, a1: Self) -> bool {
         match a0 {
@@ -283,40 +266,46 @@ impl AbstractProperties<SignAbstraction> for SignAbstraction {
         if !Self::sat(a, bexpr) {
             return Self::Bottom;
         }
-        match bexpr {
-            BExpr::EQ(_, Const::Const(number)) => {
-                let number = *number;
-                number.into()
-            }
-            BExpr::LE(_, Const::Const(number)) => {
-                if *number <= 0.0 {
-                    Self::Neg
-                } else {
-                    Self::Top
+
+        if *a == Self::Top {
+            match bexpr {
+                BExpr::EQ(_, Const::Const(number)) => {
+                    return <f64 as Into<SignAbstraction>>::into(*number);
+                }
+                BExpr::GE(_, Const::Const(number)) => {
+                    if <f64 as Into<SignAbstraction>>::into(*number) == Self::Neg {
+                        return *a;
+                    } else {
+                        return Self::Pos;
+                    }
+                }
+                BExpr::GT(_, Const::Const(number)) => {
+                    if <f64 as Into<SignAbstraction>>::into(*number) == Self::Pos {
+                        return *a;
+                    } else {
+                        return Self::Pos;
+                    }
+                }
+                BExpr::LE(_, Const::Const(number)) => {
+                    if <f64 as Into<SignAbstraction>>::into(*number) == Self::Pos {
+                        return *a;
+                    } else {
+                        return Self::Neg;
+                    }
+                }
+                BExpr::LT(_, Const::Const(number)) => {
+                    if <f64 as Into<SignAbstraction>>::into(*number) == Self::Neg {
+                        return *a;
+                    } else {
+                        return Self::Neg;
+                    }
+                }
+                BExpr::NE(_, Const::Const(_)) => {
+                    return *a;
                 }
             }
-            BExpr::LT(_, Const::Const(number)) => {
-                if *number < 0.0 {
-                    Self::Neg
-                } else {
-                    Self::Top
-                }
-            }
-            BExpr::GE(_, Const::Const(number)) => {
-                if *number >= 0.0 {
-                    Self::Pos
-                } else {
-                    Self::Top
-                }
-            }
-            BExpr::GT(_, Const::Const(number)) => {
-                if *number > 0.0 {
-                    Self::Pos
-                } else {
-                    Self::Top
-                }
-            }
-            BExpr::NE(_, Const::Const(_)) => Self::Bottom,
+        } else {
+            return *a;
         }
     }
 }
@@ -388,7 +377,7 @@ mod tests {
 
         let post_truth = MemoryState::from_state(HashMap::from([
             ("x".to_string(), SignAbstraction::Top),
-            ("y".to_string(), SignAbstraction::Top),
+            ("y".to_string(), SignAbstraction::Neg),
         ]));
         assert_eq!(post_truth, *post_analyzed);
     }
@@ -416,6 +405,21 @@ mod tests {
         let post_analyzed = pre.analyze_command(&command);
 
         let post_truth = MemoryState::from_state(HashMap::from([]));
+        assert_eq!(post_truth, *post_analyzed);
+    }
+
+    #[test]
+    fn example_presentation() {
+        let program = "x := 0; y := 0; while (x < 10) {x := x + 1; y := x}";
+        let command = parse(&program);
+
+        let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
+        let post_analyzed = pre.analyze_command(&command);
+
+        let post_truth = MemoryState::from_state(HashMap::from([
+            ("x".to_string(), SignAbstraction::Pos),
+            ("y".to_string(), SignAbstraction::Pos),
+        ]));
         assert_eq!(post_truth, *post_analyzed);
     }
 }

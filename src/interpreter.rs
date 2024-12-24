@@ -170,15 +170,27 @@ impl<
                 self.join(&m1);
             }
             Command::While(bexpr, c) => {
+                let mut i = 0;
                 loop {
-                    let prev_m = self.clone().filter(bexpr).analyze_command(c).to_owned();
-                    self.join(&prev_m);
+                    let mut prev_m = self.clone();
+                    println!("prev m: {:?}", &prev_m);
 
-                    if prev_m.inclusion(self) {
+                    prev_m.filter(bexpr);
+                    println!("filtered: {:?}", &prev_m);
+
+                    prev_m.analyze_command(c);
+                    println!("analyzed: {:?}", &prev_m);
+
+                    self.join(&prev_m);
+                    println!("joined: {:?}", &self);
+
+                    i += 1;
+                    if prev_m.inclusion(self) || i == 10 {
                         break;
                     }
                 }
                 self.filter(&bexpr.negate());
+                println!("negation filtered: {:?}", &self);
             }
         }
         self
