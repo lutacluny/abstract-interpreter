@@ -1,3 +1,4 @@
+use core::f64;
 use std::ptr::eq;
 use std::{cmp::Ordering, ops};
 
@@ -14,7 +15,7 @@ pub struct Interval {
 
 impl Interval {
     pub fn new(a: f64, b: f64) -> Interval {
-        assert!(a < b);
+        assert!(a <= b);
         Interval { a, b }
     }
 }
@@ -44,10 +45,8 @@ impl ops::Add for IntervalAbstraction {
                 Self::Interval(Interval { a: rhs_a, b: rhs_b }) => {
                     let a = self_a + rhs_a;
                     let b = self_b + rhs_b;
-                    IntervalAbstraction::Interval(Interval {
-                        a: f64::min(a, b),
-                        b: f64::max(a, b),
-                    })
+
+                    (f64::min(a, b), f64::max(a, b)).into()
                 }
             },
         }
@@ -72,10 +71,8 @@ impl ops::Sub for IntervalAbstraction {
                 Self::Interval(Interval { a: rhs_a, b: rhs_b }) => {
                     let a = self_a - rhs_a;
                     let b = self_b - rhs_b;
-                    IntervalAbstraction::Interval(Interval {
-                        a: f64::min(a, b),
-                        b: f64::max(a, b),
-                    })
+
+                    (f64::min(a, b), f64::max(a, b)).into()
                 }
             },
         }
@@ -100,10 +97,8 @@ impl ops::Mul for IntervalAbstraction {
                 Self::Interval(Interval { a: rhs_a, b: rhs_b }) => {
                     let a = self_a * rhs_a;
                     let b = self_b * rhs_b;
-                    IntervalAbstraction::Interval(Interval {
-                        a: f64::min(a, b),
-                        b: f64::max(a, b),
-                    })
+
+                    (f64::min(a, b), f64::max(a, b)).into()
                 }
             },
         }
@@ -128,10 +123,7 @@ impl ops::Div for IntervalAbstraction {
                 Self::Interval(Interval { a: rhs_a, b: rhs_b }) => {
                     let a = self_a / rhs_a;
                     let b = self_b / rhs_b;
-                    IntervalAbstraction::Interval(Interval {
-                        a: f64::min(a, b),
-                        b: f64::max(a, b),
-                    })
+                    (f64::min(a, b), f64::max(a, b)).into()
                 }
             },
         }
@@ -148,10 +140,7 @@ impl ops::Neg for IntervalAbstraction {
             Self::Interval(Interval { a, b }) => {
                 let a = -a;
                 let b = -b;
-                IntervalAbstraction::Interval(Interval {
-                    a: f64::min(a, b),
-                    b: f64::max(a, b),
-                })
+                (f64::min(a, b), f64::max(a, b)).into()
             }
         }
     }
@@ -159,7 +148,7 @@ impl ops::Neg for IntervalAbstraction {
 
 impl From<f64> for IntervalAbstraction {
     fn from(value: f64) -> Self {
-        Self::Interval(Interval { a: value, b: value })
+        (value, value).into()
     }
 }
 
@@ -265,7 +254,7 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
         }
     }
 
-    fn inclusion(a0: IntervalAbstraction, a1: IntervalAbstraction) -> bool {
+    fn inclusion(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> bool {
         match a0 {
             Self::Bottom => true,
             Self::Top => match a1 {
@@ -294,7 +283,7 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                     if a == f64::MIN && b == f64::MAX {
                         Self::Top
                     } else {
-                        Self::Interval(Interval { a, b })
+                        (a, b).into()
                     }
                 }
             },
@@ -367,6 +356,42 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                 }
             },
         }
+    }
+
+    fn widen(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> IntervalAbstraction {
+        match a0 {
+            IntervalAbstraction::Bottom => *a1,
+            IntervalAbstraction::Top => IntervalAbstraction::Top,
+            IntervalAbstraction::Interval(Interval { a: a0_a, b: a0_b }) => match a1 {
+                IntervalAbstraction::Bottom => *a0,
+                IntervalAbstraction::Top => IntervalAbstraction::Top,
+                IntervalAbstraction::Interval(Interval { a: a1_a, b: a1_b }) => {
+                    if a0_a == a1_a {
+                        if a0_b < a1_b {
+                            (*a0_a, f64::MAX).into()
+                        } else {
+                            *a0
+                        }
+                    } else if a0_b == a1_b {
+                        if a1_a < a0_a {
+                            (f64::MIN, *a0_b).into()
+                        } else {
+                            *a0
+                        }
+                    } else if a0_a <= a1_b && a0_b >= a1_b {
+                        *a0
+                    } else {
+                        IntervalAbstraction::Top
+                    }
+                }
+            },
+        }
+    }
+}
+
+impl From<(f64, f64)> for IntervalAbstraction {
+    fn from((a, b): (f64, f64)) -> Self {
+        IntervalAbstraction::Interval(Interval::new(a, b))
     }
 }
 

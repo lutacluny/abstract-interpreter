@@ -11,9 +11,10 @@ pub trait AbstractProperties<A> {
     fn top() -> Top;
     fn bottom() -> Bottom;
     fn sat(a: &A, bexpr: &BExpr) -> bool;
-    fn inclusion(a0: A, a1: A) -> bool;
+    fn inclusion(a0: &A, a1: &A) -> bool;
     fn join(a0: &A, a1: &A) -> A;
     fn refine(a: &A, bexpr: &BExpr) -> A;
+    fn widen(a0: &A, a1: &A) -> A;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,7 +225,7 @@ impl<
     fn inclusion(&self, other: &MemoryState<A>) -> bool {
         for (ident, a_other) in &other.state {
             if let Some(a_self) = self.state.get(ident) {
-                if !A::inclusion(*a_other, *a_self) {
+                if !A::inclusion(a_other, a_self) {
                     return false;
                 }
             }
