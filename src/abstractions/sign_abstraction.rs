@@ -202,7 +202,7 @@ impl AbstractProperties<SignAbstraction> for SignAbstraction {
 
         result
     }
-    fn inclusion(a0: &Self, a1: &Self) -> bool {
+    fn first_includes_second(a0: &Self, a1: &Self) -> bool {
         match a0 {
             Self::Bottom => true,
 
@@ -309,7 +309,11 @@ impl AbstractProperties<SignAbstraction> for SignAbstraction {
         }
     }
 
-    fn widen(a0: &SignAbstraction, a1: &SignAbstraction) -> SignAbstraction {
+    fn widen(
+        a0: &SignAbstraction,
+        a1: &SignAbstraction,
+        widening_treshold: &SignAbstraction,
+    ) -> SignAbstraction {
         SignAbstraction::join(a0, a1)
     }
 }

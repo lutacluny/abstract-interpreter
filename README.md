@@ -18,5 +18,10 @@ This command line program, written in pure Rust, that allows to parse a program 
 
 ## Comments
 
+### Initialization of Variables
+
 In contrast to the static analysis described in the book, I do not initialize all variables at the beginning with Top. It has the advantage that I do not have to scan for all variables as an initial step. Whenever a hew new variable is encountered, it is mapped to an abstract value that satisfies the statenent where the variable occurs. A site-effect of this procedure is that loop unrolling doesn't have any impact to the post-condition, since the loop invariant is calculated directly in the loop body. Because the respective variables have not been initialized before, they are not considered for a join at the end of the loop. This behavior can be observed in the respective [tests](./src/abstractions/interval_abstraction.rs) that implement the example from Figure 5 in the book. 
 
+### Intervales
+
+My Intervals do not work on Integers, as in the book, but on floats. 

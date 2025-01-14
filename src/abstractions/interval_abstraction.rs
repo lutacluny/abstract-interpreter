@@ -178,7 +178,7 @@ impl PartialEq for IntervalAbstraction {
     }
 
     fn ne(&self, other: &Self) -> bool {
-        !eq(self, other)
+        !IntervalAbstraction::eq(self, other)
     }
 }
 
@@ -254,17 +254,17 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
         }
     }
 
-    fn inclusion(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> bool {
+    fn first_includes_second(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> bool {
         match a0 {
-            Self::Bottom => true,
-            Self::Top => match a1 {
-                Self::Top => true,
+            Self::Bottom => match a1 {
+                Self::Bottom => true,
                 _ => false,
             },
+            Self::Top => true,
             Self::Interval(Interval { a: a0_a, b: a0_b }) => match a1 {
-                Self::Bottom => false,
-                Self::Top => true,
-                Self::Interval(Interval { a: a1_a, b: a1_b }) => a1_a <= a0_a && a0_b <= a1_b,
+                Self::Bottom => true,
+                Self::Top => false,
+                Self::Interval(Interval { a: a1_a, b: a1_b }) => *a0_a <= *a1_a && *a1_b <= *a0_b,
             },
         }
     }
@@ -302,23 +302,10 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                     let number = *number;
                     number.into()
                 }
-                BExpr::LE(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: f64::MIN,
-                    b: *number,
-                }),
-                BExpr::LT(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: f64::MIN,
-                    b: *number - EPS,
-                }),
-
-                BExpr::GE(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: *number,
-                    b: f64::MAX,
-                }),
-                BExpr::GT(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: *number + EPS,
-                    b: f64::MAX,
-                }),
+                BExpr::LE(_, Const::Const(number)) => (f64::MIN, *number).into(),
+                BExpr::LT(_, Const::Const(number)) => (f64::MIN, *number - EPS).into(),
+                BExpr::GE(_, Const::Const(number)) => (*number, f64::MAX).into(),
+                BExpr::GT(_, Const::Const(number)) => (*number + EPS, f64::MAX).into(),
                 BExpr::NE(_, Const::Const(_)) => Self::Bottom,
             },
             Self::Interval(Interval { a, b }) => match bexpr {
@@ -327,38 +314,44 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                     number.into()
                 }
                 BExpr::LE(_, Const::Const(number)) => {
-                    Self::Interval(Interval { a: *a, b: *number })
-                }
-                BExpr::LT(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: *a,
-                    b: *number - EPS,
-                }),
-
-                BExpr::GE(_, Const::Const(number)) => {
-                    Self::Interval(Interval { a: *number, b: *b })
-                }
-                BExpr::GT(_, Const::Const(number)) => Self::Interval(Interval {
-                    a: *number + EPS,
-                    b: *b,
-                }),
-                BExpr::NE(_, Const::Const(number)) => {
-                    if b < number {
-                        Self::Interval(Interval {
-                            a: *a,
-                            b: *number - EPS,
-                        })
+                    if *number <= *b {
+                        (*a, *number).into()
                     } else {
-                        Self::Interval(Interval {
-                            a: *number + EPS,
-                            b: *b,
-                        })
+                        (*a, *b).into()
                     }
                 }
+                BExpr::LT(_, Const::Const(number)) => {
+                    if *number < *b {
+                        (*a, *number).into()
+                    } else {
+                        (*a, *b).into()
+                    }
+                }
+
+                BExpr::GE(_, Const::Const(number)) => {
+                    if *number >= *a {
+                        (*number, *b).into()
+                    } else {
+                        (*a, *b).into()
+                    }
+                }
+                BExpr::GT(_, Const::Const(number)) => {
+                    if *number > *a {
+                        (*number, *b).into()
+                    } else {
+                        (*a, *b).into()
+                    }
+                }
+                BExpr::NE(_, Const::Const(_)) => Self::Bottom,
             },
         }
     }
 
-    fn widen(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> IntervalAbstraction {
+    fn widen(
+        a0: &IntervalAbstraction,
+        a1: &IntervalAbstraction,
+        widening_treshold: &IntervalAbstraction,
+    ) -> IntervalAbstraction {
         match a0 {
             IntervalAbstraction::Bottom => IntervalAbstraction::Top,
             IntervalAbstraction::Top => IntervalAbstraction::Top,
@@ -366,20 +359,30 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                 IntervalAbstraction::Bottom => *a0,
                 IntervalAbstraction::Top => IntervalAbstraction::Top,
                 IntervalAbstraction::Interval(Interval { a: a1_a, b: a1_b }) => {
-                    if a0_a == a1_a {
-                        if a0_b < a1_b {
-                            (*a0_a, f64::MAX).into()
+                    if *a1_a < *a0_a {
+                        if *a0_b < *a1_b {
+                            IntervalAbstraction::Top
                         } else {
-                            *a0
-                        }
-                    } else if a0_b == a1_b {
-                        if a1_a < a0_a {
-                            (f64::MIN, *a0_b).into()
-                        } else {
-                            *a0
+                            match widening_treshold {
+                                IntervalAbstraction::Top => (f64::MIN, *a0_b).into(),
+                                IntervalAbstraction::Bottom => *a0,
+                                IntervalAbstraction::Interval(Interval { a: t_a, b: _ }) => {
+                                    (*t_a, *a0_b).into()
+                                }
+                            }
                         }
                     } else {
-                        IntervalAbstraction::Top
+                        if *a0_b < *a1_b {
+                            match widening_treshold {
+                                IntervalAbstraction::Top => (*a0_a, f64::MAX).into(),
+                                IntervalAbstraction::Bottom => *a0,
+                                IntervalAbstraction::Interval(Interval { a: _, b: t_b }) => {
+                                    (*a0_a, *t_b).into()
+                                }
+                            }
+                        } else {
+                            *a0
+                        }
                     }
                 }
             },
@@ -422,16 +425,10 @@ mod tests {
     }
 
     #[test]
-    fn figure_5_4() {
+    fn figure_5_4_without_unrolling_with_x_initialized_before() {
         let program = "i := 1; while (i > 0) {if (x < 0) {x := 0} else {x := 1 + x}; if (x > 1000) {x := 0} else {x := x + 1}; input(i)}";
         let command = parse(&program);
 
-        without_unrolling_with_x_initialized_before(&command);
-        with_unrolling_with_x_initialized_in_the_loop_body_default_behavior(&command);
-        with_unrolling(&command);
-    }
-
-    fn without_unrolling_with_x_initialized_before(command: &Command) {
         let mut pre: MemoryState<IntervalAbstraction> =
             MemoryState::from_state(HashMap::from([("x".to_string(), IntervalAbstraction::Top)]));
 
@@ -444,7 +441,11 @@ mod tests {
         assert_eq!(x_truth, *x_analyzed);
     }
 
-    fn with_unrolling_with_x_initialized_in_the_loop_body_default_behavior(command: &Command) {
+    #[test]
+    fn figure_5_4_with_unrolling_with_x_initialized_in_the_loop_body_default_behavior() {
+        let program = "i := 1; while (i > 0) {if (x < 0) {x := 0} else {x := 1 + x}; if (x > 1000) {x := 0} else {x := x + 1}; input(i)}";
+        let command = parse(&program);
+
         let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
 
         let post_analyzed = pre
@@ -456,13 +457,18 @@ mod tests {
         assert_eq!(x_truth, *x_analyzed);
     }
 
-    fn with_unrolling(command: &Command) {
+    #[test]
+    fn figure_5_4_with_unrolling() {
+        let program = "i := 1; while (i > 0) {if (x < 0) {x := 0} else {x := 1 + x}; if (x > 1000) {x := 0} else {x := x + 1}; input(i)}";
+        let command = parse(&program);
+
         let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
 
         let params = Params {
-            use_widening: false,
             loop_unrollings: 1,
+            use_widening: false,
             widening_delays: 0,
+            widening_treshold: IntervalAbstraction::Top,
         };
 
         let post_analyzed = pre.analyze_command(&command, &params);
@@ -473,7 +479,22 @@ mod tests {
     }
 
     #[test]
-    fn figure_5_5_b_without_widening_delay() {
+    fn figure_5_5_b_without_widening() {
+        let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := x + 1}}";
+
+        let command = parse(&program);
+
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+
+        let x_truth: IntervalAbstraction = IntervalAbstraction::Bottom;
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    #[test]
+    fn figure_5_5_b_with_widening() {
         let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := x + 1}}";
 
         let command = parse(&program);
@@ -484,20 +505,18 @@ mod tests {
             use_widening: true,
             loop_unrollings: 0,
             widening_delays: 0,
+            widening_treshold: IntervalAbstraction::Top,
         };
 
         let post_analyzed = pre.analyze_command(&command, &params);
         let x_analyzed = post_analyzed.lookup_var("x").unwrap();
 
-        let x_truth = IntervalAbstraction::Interval(Interval {
-            a: 0.0,
-            b: f64::MAX,
-        });
+        let x_truth: IntervalAbstraction = (100.0, f64::MAX).into();
         assert_eq!(x_truth, *x_analyzed);
     }
 
     #[test]
-    fn figure_5_5_b_with_widening_delay() {
+    fn figure_5_5_b_with_delayed_widening() {
         let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := 1 + x}}";
 
         let command = parse(&program);
@@ -507,13 +526,36 @@ mod tests {
         let params = Params {
             use_widening: true,
             loop_unrollings: 0,
-            widening_delays: 1,
+            widening_delays: 51,
+            widening_treshold: IntervalAbstraction::Top,
         };
 
         let post_analyzed = pre.analyze_command(&command, &params);
         let x_analyzed = post_analyzed.lookup_var("x").unwrap();
 
-        let x_truth = IntervalAbstraction::Interval(Interval { a: 0.0, b: 50.0 });
+        let x_truth = IntervalAbstraction::Bottom;
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    #[test]
+    fn figure_5_5_b_with_widening_treshold() {
+        let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := x + 1}}";
+
+        let command = parse(&program);
+
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let params = Params {
+            use_widening: true,
+            loop_unrollings: 0,
+            widening_delays: 0,
+            widening_treshold: (-50.0, 50.0).into(),
+        };
+
+        let post_analyzed = pre.analyze_command(&command, &params);
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+
+        let x_truth = IntervalAbstraction::Bottom;
         assert_eq!(x_truth, *x_analyzed);
     }
 }

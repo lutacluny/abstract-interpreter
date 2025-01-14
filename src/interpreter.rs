@@ -11,10 +11,10 @@ pub trait AbstractProperties<A> {
     fn top() -> Top;
     fn bottom() -> Bottom;
     fn sat(a: &A, bexpr: &BExpr) -> bool;
-    fn inclusion(a0: &A, a1: &A) -> bool;
+    fn first_includes_second(a0: &A, a1: &A) -> bool;
     fn join(a0: &A, a1: &A) -> A;
     fn refine(a: &A, bexpr: &BExpr) -> A;
-    fn widen(a0: &A, a1: &A) -> A;
+    fn widen(a0: &A, a1: &A, treshold: &A) -> A;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,18 +35,20 @@ pub struct MemoryState<
     state: HashMap<String, A>,
 }
 
-pub struct Params {
-    pub use_widening: bool,
+pub struct Params<A> {
     pub loop_unrollings: u8,
+    pub use_widening: bool,
     pub widening_delays: u8,
+    pub widening_treshold: A,
 }
 
-impl Params {
-    pub fn no_widening() -> Params {
+impl<A: cmp::PartialOrd + AbstractProperties<A> + From<Top>> Params<A> {
+    pub fn no_widening() -> Params<A> {
         Params {
             use_widening: false,
             loop_unrollings: 0,
             widening_delays: 0,
+            widening_treshold: A::top().into(),
         }
     }
 }
@@ -164,17 +166,26 @@ impl<
         }
     }
 
-    pub fn analyze_command(&mut self, c: &Command, params: &Params) -> &MemoryState<A> {
+    pub fn analyze_command(&mut self, c: &Command, params: &Params<A>) -> &MemoryState<A> {
         match c {
             Command::Skip => (),
             Command::Seq(c1, c2) => {
                 self.analyze_command(c1, params);
                 self.analyze_command(c2, params);
             }
-            Command::Assign(Var::Var(ident), sexpr) => {
-                let a = self.interprete_sexpr(sexpr);
-                self.state.insert(ident.clone(), a);
-            }
+            Command::Assign(Var::Var(ident), sexpr) => match self.state.get(&ident.clone()) {
+                Some(val) => {
+                    if *val != A::bottom().into() {
+                        let a = self.interprete_sexpr(sexpr);
+                        self.state.insert(ident.clone(), a);
+                    }
+                }
+                None => {
+                    let a = self.interprete_sexpr(sexpr);
+                    self.state.insert(ident.clone(), a);
+                }
+            },
+
             Command::Input(Var::Var(ident)) => {
                 self.state.insert(ident.clone(), A::top().into());
             }
@@ -186,9 +197,15 @@ impl<
                     .analyze_command(c1, params)
                     .to_owned();
 
+                //println!("if: {:?}", &m1);
+
                 self.filter(&bexpr.negate()).analyze_command(c2, params);
 
-                self.join_state(&m1, params.use_widening);
+                //println!("else: {:?}", &self);
+
+                self.join_state(&m1, false, &params.widening_treshold);
+
+                //println!("joined: {:?}", &self);
             }
             Command::While(bexpr, c) => {
                 let mut i = 0;
@@ -199,25 +216,25 @@ impl<
 
                 let mut nr_of_joins = 0;
                 loop {
-                    let mut prev_m = self.clone();
+                    let prev_m = self.clone();
                     println!("prev m: {:?}", &prev_m);
 
-                    prev_m.filter(bexpr);
-                    println!("filtered: {:?}", &prev_m);
+                    self.filter(bexpr);
+                    println!("filtered: {:?}", &self);
 
-                    prev_m.analyze_command(c, params);
-                    println!("analyzed: {:?}", &prev_m);
+                    self.analyze_command(c, params);
+                    println!("analyzed: {:?}", &self);
 
                     if params.use_widening && nr_of_joins >= params.widening_delays {
-                        self.join_state(&prev_m, true);
+                        self.join_state(&prev_m, true, &params.widening_treshold);
+                        println!("widened: {:?}", &self);
                     } else {
-                        self.join_state(&prev_m, false);
+                        self.join_state(&prev_m, false, &params.widening_treshold);
+                        println!("joined: {:?}", &self);
                         nr_of_joins += 1;
                     }
 
-                    println!("joined: {:?}", &self);
-
-                    if prev_m.inclusion(self) || i == 10 {
+                    if prev_m.includes(self) || i == 52 {
                         break;
                     }
 
@@ -231,13 +248,18 @@ impl<
         self
     }
 
-    fn join_state(&mut self, other: &MemoryState<A>, use_widening: bool) -> &mut Self {
+    fn join_state(
+        &mut self,
+        other: &MemoryState<A>,
+        use_widening: bool,
+        widening_treshold: &A,
+    ) -> &mut Self {
         for (ident, a_other) in &other.state {
             self.state
                 .entry(ident.clone())
                 .and_modify(|a_self| {
                     *a_self = match use_widening {
-                        true => A::widen(a_self, &a_other),
+                        true => A::widen(&a_other, a_self, widening_treshold),
                         false => A::join(a_self, &a_other),
                     }
                 })
@@ -260,10 +282,10 @@ impl<
         self
     }
 
-    fn inclusion(&self, other: &MemoryState<A>) -> bool {
+    fn includes(&self, other: &MemoryState<A>) -> bool {
         for (ident, a_other) in &other.state {
             if let Some(a_self) = self.state.get(ident) {
-                if !A::inclusion(a_other, a_self) {
+                if !A::first_includes_second(a_self, a_other) {
                     return false;
                 }
             }
