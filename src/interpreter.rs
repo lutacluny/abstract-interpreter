@@ -167,82 +167,75 @@ impl<
     }
 
     pub fn analyze_command(&mut self, c: &Command, params: &Params<A>) -> &MemoryState<A> {
-        match c {
-            Command::Skip => (),
-            Command::Seq(c1, c2) => {
-                self.analyze_command(c1, params);
-                self.analyze_command(c2, params);
-            }
-            Command::Assign(Var::Var(ident), sexpr) => match self.state.get(&ident.clone()) {
-                Some(val) => {
-                    if *val != A::bottom().into() {
-                        let a = self.interprete_sexpr(sexpr);
-                        self.state.insert(ident.clone(), a);
-                    }
+        if !self.all_vars_are_bottom() {
+            match c {
+                Command::Skip => (),
+                Command::Seq(c1, c2) => {
+                    self.analyze_command(c1, params);
+                    self.analyze_command(c2, params);
                 }
-                None => {
+                Command::Assign(Var::Var(ident), sexpr) => {
                     let a = self.interprete_sexpr(sexpr);
                     self.state.insert(ident.clone(), a);
                 }
-            },
-
-            Command::Input(Var::Var(ident)) => {
-                self.state.insert(ident.clone(), A::top().into());
-            }
-            Command::If(bexpr, c1, c2) => {
-                let m1 = self
-                    .clone()
-                    .filter(bexpr)
-                    .to_owned()
-                    .analyze_command(c1, params)
-                    .to_owned();
-
-                //println!("if: {:?}", &m1);
-
-                self.filter(&bexpr.negate()).analyze_command(c2, params);
-
-                //println!("else: {:?}", &self);
-
-                self.join_state(&m1, false, &params.widening_treshold);
-
-                //println!("joined: {:?}", &self);
-            }
-            Command::While(bexpr, c) => {
-                let mut i = 0;
-
-                for _ in 0..params.loop_unrollings {
-                    self.analyze_command(c, params);
+                Command::Input(Var::Var(ident)) => {
+                    self.state.insert(ident.clone(), A::top().into());
                 }
+                Command::If(bexpr, c1, c2) => {
+                    let m1 = self
+                        .clone()
+                        .filter(bexpr)
+                        .to_owned()
+                        .analyze_command(c1, params)
+                        .to_owned();
 
-                let mut nr_of_joins = 0;
-                loop {
-                    let prev_m = self.clone();
-                    println!("prev m: {:?}", &prev_m);
+                    //println!("if: {:?}", &m1);
 
-                    self.filter(bexpr);
-                    println!("filtered: {:?}", &self);
+                    self.filter(&bexpr.negate()).analyze_command(c2, params);
 
-                    self.analyze_command(c, params);
-                    println!("analyzed: {:?}", &self);
+                    //println!("else: {:?}", &self);
 
-                    if params.use_widening && nr_of_joins >= params.widening_delays {
-                        self.join_state(&prev_m, true, &params.widening_treshold);
-                        println!("widened: {:?}", &self);
-                    } else {
-                        self.join_state(&prev_m, false, &params.widening_treshold);
-                        println!("joined: {:?}", &self);
-                        nr_of_joins += 1;
+                    self.join_state(&m1, false, &params.widening_treshold);
+
+                    //println!("joined: {:?}", &self);
+                }
+                Command::While(bexpr, c) => {
+                    let mut i = 0;
+
+                    for _ in 0..params.loop_unrollings {
+                        self.analyze_command(c, params);
                     }
 
-                    if prev_m.includes(self) || i == 52 {
-                        break;
+                    let mut nr_of_joins = 0;
+                    loop {
+                        let prev_m = self.clone();
+                        println!("prev m: {:?}", &prev_m);
+
+                        self.filter(bexpr);
+                        println!("filtered: {:?}", &self);
+
+                        self.analyze_command(c, params);
+                        println!("analyzed: {:?}", &self);
+
+                        if params.use_widening && nr_of_joins >= params.widening_delays {
+                            self.join_state(&prev_m, true, &params.widening_treshold);
+                            println!("widened: {:?}", &self);
+                        } else {
+                            self.join_state(&prev_m, false, &params.widening_treshold);
+                            println!("joined: {:?}", &self);
+                            nr_of_joins += 1;
+                        }
+
+                        if prev_m.includes(self) {
+                            break;
+                        }
+
+                        i += 1;
                     }
 
-                    i += 1;
+                    self.filter(&bexpr.negate());
+                    println!("negation filtered: {:?}", &self);
                 }
-
-                self.filter(&bexpr.negate());
-                println!("negation filtered: {:?}", &self);
             }
         }
         self
@@ -298,5 +291,9 @@ impl<
         for value in self.state.values_mut() {
             *value = A::bottom().into();
         }
+    }
+
+    fn all_vars_are_bottom(&self) -> bool {
+        self.state.len() != 0 && self.state.values().all(|&x| x == A::bottom().into())
     }
 }

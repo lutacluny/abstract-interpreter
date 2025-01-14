@@ -1,8 +1,7 @@
 use core::f64;
-use std::ptr::eq;
 use std::{cmp::Ordering, ops};
 
-use crate::command_parser::{BExpr, Command, Const};
+use crate::command_parser::{BExpr, Const};
 use crate::interpreter::{AbstractProperties, Bottom, Params, Top};
 
 const EPS: f64 = 1e-5;
@@ -413,13 +412,7 @@ mod tests {
 
         let post_truth = MemoryState::from_state(HashMap::from([
             ("x".to_string(), IntervalAbstraction::Top),
-            (
-                "y".to_string(),
-                IntervalAbstraction::Interval(Interval {
-                    a: 0.0,
-                    b: f64::MAX,
-                }),
-            ),
+            ("y".to_string(), (0.0, f64::MAX).into()),
         ]));
         assert_eq!(post_truth, *post_analyzed);
     }
@@ -557,5 +550,20 @@ mod tests {
 
         let x_truth = IntervalAbstraction::Bottom;
         assert_eq!(x_truth, *x_analyzed);
+    }
+
+    #[test]
+    fn figure_5_2_coalescent_product_domain() {
+        let program = "x := 8; y := 1; if (x < 0) {y := 0} else {skip}";
+        let command = parse(&program);
+
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
+
+        let post_truth = MemoryState::from_state(HashMap::from([
+            ("x".to_string(), (8.0, 8.0).into()),
+            ("y".to_string(), (1.0, 1.0).into()),
+        ]));
+        assert_eq!(post_truth, *post_analyzed);
     }
 }
