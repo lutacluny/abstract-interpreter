@@ -2,8 +2,8 @@ use core::f64;
 use std::ptr::eq;
 use std::{cmp::Ordering, ops};
 
-use crate::command_parser::{BExpr, Const};
-use crate::interpreter::{AbstractProperties, Bottom, Top};
+use crate::command_parser::{BExpr, Command, Const};
+use crate::interpreter::{AbstractProperties, Bottom, Params, Top};
 
 const EPS: f64 = 1e-5;
 
@@ -360,7 +360,7 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
 
     fn widen(a0: &IntervalAbstraction, a1: &IntervalAbstraction) -> IntervalAbstraction {
         match a0 {
-            IntervalAbstraction::Bottom => *a1,
+            IntervalAbstraction::Bottom => IntervalAbstraction::Top,
             IntervalAbstraction::Top => IntervalAbstraction::Top,
             IntervalAbstraction::Interval(Interval { a: a0_a, b: a0_b }) => match a1 {
                 IntervalAbstraction::Bottom => *a0,
@@ -378,8 +378,6 @@ impl AbstractProperties<IntervalAbstraction> for IntervalAbstraction {
                         } else {
                             *a0
                         }
-                    } else if a0_a <= a1_b && a0_b >= a1_b {
-                        *a0
                     } else {
                         IntervalAbstraction::Top
                     }
@@ -408,7 +406,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth = MemoryState::from_state(HashMap::from([
             ("x".to_string(), IntervalAbstraction::Top),
@@ -421,5 +419,101 @@ mod tests {
             ),
         ]));
         assert_eq!(post_truth, *post_analyzed);
+    }
+
+    #[test]
+    fn figure_5_4() {
+        let program = "i := 1; while (i > 0) {if (x < 0) {x := 0} else {x := 1 + x}; if (x > 1000) {x := 0} else {x := x + 1}; input(i)}";
+        let command = parse(&program);
+
+        without_unrolling_with_x_initialized_before(&command);
+        with_unrolling_with_x_initialized_in_the_loop_body_default_behavior(&command);
+        with_unrolling(&command);
+    }
+
+    fn without_unrolling_with_x_initialized_before(command: &Command) {
+        let mut pre: MemoryState<IntervalAbstraction> =
+            MemoryState::from_state(HashMap::from([("x".to_string(), IntervalAbstraction::Top)]));
+
+        let post_analyzed = pre
+            .analyze_command(&command, &Params::no_widening())
+            .to_owned();
+
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+        let x_truth = IntervalAbstraction::Top;
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    fn with_unrolling_with_x_initialized_in_the_loop_body_default_behavior(command: &Command) {
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let post_analyzed = pre
+            .analyze_command(&command, &Params::no_widening())
+            .to_owned();
+
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+        let x_truth = IntervalAbstraction::Interval(Interval { a: 0.0, b: 1001.0 });
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    fn with_unrolling(command: &Command) {
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let params = Params {
+            use_widening: false,
+            loop_unrollings: 1,
+            widening_delays: 0,
+        };
+
+        let post_analyzed = pre.analyze_command(&command, &params);
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+
+        let x_truth = IntervalAbstraction::Interval(Interval { a: 0.0, b: 1001.0 });
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    #[test]
+    fn figure_5_5_b_without_widening_delay() {
+        let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := x + 1}}";
+
+        let command = parse(&program);
+
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let params = Params {
+            use_widening: true,
+            loop_unrollings: 0,
+            widening_delays: 0,
+        };
+
+        let post_analyzed = pre.analyze_command(&command, &params);
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+
+        let x_truth = IntervalAbstraction::Interval(Interval {
+            a: 0.0,
+            b: f64::MAX,
+        });
+        assert_eq!(x_truth, *x_analyzed);
+    }
+
+    #[test]
+    fn figure_5_5_b_with_widening_delay() {
+        let program = "x := 0; while (x <= 100) {if (x >= 50) {x := 10} else {x := 1 + x}}";
+
+        let command = parse(&program);
+
+        let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
+
+        let params = Params {
+            use_widening: true,
+            loop_unrollings: 0,
+            widening_delays: 1,
+        };
+
+        let post_analyzed = pre.analyze_command(&command, &params);
+        let x_analyzed = post_analyzed.lookup_var("x").unwrap();
+
+        let x_truth = IntervalAbstraction::Interval(Interval { a: 0.0, b: 50.0 });
+        assert_eq!(x_truth, *x_analyzed);
     }
 }

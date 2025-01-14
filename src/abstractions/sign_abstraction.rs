@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, ops};
 
 use crate::command_parser::{BExpr, Const};
-use crate::interpreter::{AbstractProperties, Bottom, Top};
+use crate::interpreter::{AbstractProperties, Bottom, Params, Top};
 
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum SignAbstraction {
@@ -339,7 +339,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth = MemoryState::from_state(HashMap::from([]));
         assert_eq!(post_truth, *post_analyzed);
@@ -351,7 +351,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth =
             MemoryState::from_state(HashMap::from([("x".to_string(), SignAbstraction::Pos)]));
@@ -364,7 +364,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth =
             MemoryState::from_state(HashMap::from([("x".to_string(), SignAbstraction::Top)]));
@@ -377,7 +377,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth = MemoryState::from_state(HashMap::from([
             ("x".to_string(), SignAbstraction::Top),
@@ -393,7 +393,7 @@ mod tests {
 
         let mut pre: MemoryState<SignAbstraction> =
             MemoryState::from_state(HashMap::from([("x".to_string(), SignAbstraction::Pos)]));
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth =
             MemoryState::from_state(HashMap::from([("x".to_string(), SignAbstraction::Bottom)]));
@@ -406,7 +406,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth = MemoryState::from_state(HashMap::from([]));
         assert_eq!(post_truth, *post_analyzed);
@@ -418,7 +418,7 @@ mod tests {
         let command = parse(&program);
 
         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-        let post_analyzed = pre.analyze_command(&command);
+        let post_analyzed = pre.analyze_command(&command, &Params::no_widening());
 
         let post_truth = MemoryState::from_state(HashMap::from([
             ("x".to_string(), SignAbstraction::Pos),

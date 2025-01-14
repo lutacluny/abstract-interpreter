@@ -8,6 +8,7 @@ use crate::command_parser::parse;
 use crate::interpreter::MemoryState;
 
 use clap::Parser;
+use interpreter::Params;
 use std::fs;
 
 #[derive(Parser, Debug)]
@@ -92,12 +93,12 @@ fn main() {
                 Some(abstraction) => match abstraction.as_str() {
                     "interval" => {
                         let mut pre: MemoryState<IntervalAbstraction> = MemoryState::new();
-                        let post = pre.analyze_command(&c);
+                        let post = pre.analyze_command(&c, &Params::no_widening());
                         println!("Interpretation result: {:?}", post);
                     }
                     "sign" => {
                         let mut pre: MemoryState<SignAbstraction> = MemoryState::new();
-                        let post = pre.analyze_command(&c);
+                        let post = pre.analyze_command(&c, &Params::no_widening());
                         println!("Interpretation result: {:?}", post);
                     }
                     _ => {
@@ -113,4 +114,6 @@ fn main() {
             std::process::exit(1);
         }
     }
+
+    todo!("read params from cli");
 }

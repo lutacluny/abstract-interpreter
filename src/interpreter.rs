@@ -35,6 +35,22 @@ pub struct MemoryState<
     state: HashMap<String, A>,
 }
 
+pub struct Params {
+    pub use_widening: bool,
+    pub loop_unrollings: u8,
+    pub widening_delays: u8,
+}
+
+impl Params {
+    pub fn no_widening() -> Params {
+        Params {
+            use_widening: false,
+            loop_unrollings: 0,
+            widening_delays: 0,
+        }
+    }
+}
+
 impl<
         A: ops::Add<Output = A>
             + ops::Neg<Output = A>
@@ -59,6 +75,10 @@ impl<
 
     pub fn from_state(state: HashMap<String, A>) -> MemoryState<A> {
         MemoryState { state }
+    }
+
+    pub fn lookup_var(&self, var: &str) -> Option<&A> {
+        self.state.get(var)
     }
 
     pub fn interprete_command(&mut self, c: &Command) -> &MemoryState<A> {
@@ -144,12 +164,12 @@ impl<
         }
     }
 
-    pub fn analyze_command(&mut self, c: &Command) -> &MemoryState<A> {
+    pub fn analyze_command(&mut self, c: &Command, params: &Params) -> &MemoryState<A> {
         match c {
             Command::Skip => (),
             Command::Seq(c1, c2) => {
-                self.analyze_command(c1);
-                self.analyze_command(c2);
+                self.analyze_command(c1, params);
+                self.analyze_command(c2, params);
             }
             Command::Assign(Var::Var(ident), sexpr) => {
                 let a = self.interprete_sexpr(sexpr);
@@ -163,15 +183,21 @@ impl<
                     .clone()
                     .filter(bexpr)
                     .to_owned()
-                    .analyze_command(c1)
+                    .analyze_command(c1, params)
                     .to_owned();
 
-                self.filter(&bexpr.negate()).analyze_command(c2);
+                self.filter(&bexpr.negate()).analyze_command(c2, params);
 
-                self.join(&m1);
+                self.join_state(&m1, params.use_widening);
             }
             Command::While(bexpr, c) => {
                 let mut i = 0;
+
+                for _ in 0..params.loop_unrollings {
+                    self.analyze_command(c, params);
+                }
+
+                let mut nr_of_joins = 0;
                 loop {
                     let mut prev_m = self.clone();
                     println!("prev m: {:?}", &prev_m);
@@ -179,17 +205,25 @@ impl<
                     prev_m.filter(bexpr);
                     println!("filtered: {:?}", &prev_m);
 
-                    prev_m.analyze_command(c);
+                    prev_m.analyze_command(c, params);
                     println!("analyzed: {:?}", &prev_m);
 
-                    self.join(&prev_m);
+                    if params.use_widening && nr_of_joins >= params.widening_delays {
+                        self.join_state(&prev_m, true);
+                    } else {
+                        self.join_state(&prev_m, false);
+                        nr_of_joins += 1;
+                    }
+
                     println!("joined: {:?}", &self);
 
-                    i += 1;
                     if prev_m.inclusion(self) || i == 10 {
                         break;
                     }
+
+                    i += 1;
                 }
+
                 self.filter(&bexpr.negate());
                 println!("negation filtered: {:?}", &self);
             }
@@ -197,14 +231,18 @@ impl<
         self
     }
 
-    fn join(&mut self, other: &MemoryState<A>) -> &mut Self {
+    fn join_state(&mut self, other: &MemoryState<A>, use_widening: bool) -> &mut Self {
         for (ident, a_other) in &other.state {
             self.state
                 .entry(ident.clone())
-                .and_modify(|a_self| *a_self = A::join(a_self, &a_other))
+                .and_modify(|a_self| {
+                    *a_self = match use_widening {
+                        true => A::widen(a_self, &a_other),
+                        false => A::join(a_self, &a_other),
+                    }
+                })
                 .or_insert(a_other.clone());
         }
-
         self
     }
 

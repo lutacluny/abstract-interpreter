@@ -144,7 +144,7 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
             .then(
                 op(">=".to_string())
                     .or(op(">".to_string()))
-                    .or(op("=<".to_string()))
+                    .or(op("<=".to_string()))
                     .or(op("<".to_string()))
                     .or(op("==".to_string())),
             )
@@ -158,6 +158,7 @@ fn parser() -> impl Parser<char, Command, Error = Simple<char>> {
 
         let input = text::keyword("input")
             .ignore_then(var.delimited_by(just('('), just(')')))
+            .padded()
             .map(Command::Input);
 
         let cif = text::keyword("if")
@@ -255,12 +256,12 @@ mod tests {
 
     #[test]
     fn cwhile() {
-        let program = "while (x < 10) {skip}";
+        let program = "while (x <= 10) {skip}";
         let command = parse(&program);
         assert_eq!(
             command,
             Command::While(
-                BExpr::LT(Var::Var("x".to_string()), Const::Const(10.0)),
+                BExpr::LE(Var::Var("x".to_string()), Const::Const(10.0)),
                 Box::new(Command::Skip)
             )
         );
