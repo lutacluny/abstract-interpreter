@@ -26,6 +26,11 @@ In contrast to the static analysis described in the book, I do not initialize al
 
 My Intervals do not work on Integers, as in the book, but on floats. 
 
-## Coalescent Product
+### Coalescent Product
 
 The analysis uses the coalescent product of the memory state as default. 
+
+
+### CLI 
+
+No everything that is implemented can be used with the CLI. But more important, everything has proper test cases that are taken directly from the book.
